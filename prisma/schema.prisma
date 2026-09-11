@@ -1,0 +1,128 @@
+// Prisma schema for DesignGym LLD Practice Platform
+// This schema represents the production persistence layer.
+// For local development, the app falls back to localStorage via LocalAttemptStore.
+//
+// Setup:
+//   1. Set DATABASE_URL in .env.local
+//   2. npx prisma migrate dev --name init
+//   3. npx prisma db seed
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Problem ──────────────────────────────────────────────────────────────────
+
+model Problem {
+  id                 String              @id @default(cuid())
+  slug               String              @unique
+  title              String
+  difficulty         Difficulty
+  estimatedMinutes   Int
+  description        String
+  constraints        String[]
+  focusAreas         String[]
+  learningObjectives String[]
+  createdAt          DateTime            @default(now())
+
+  requirements       ProblemRequirement[]
+  attempts           Attempt[]
+}
+
+model ProblemRequirement {
+  id          String  @id @default(cuid())
+  problemId   String
+  title       String
+  description String
+  sortOrder   Int     @default(0)
+
+  problem     Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+}
+
+// ── Attempt ───────────────────────────────────────────────────────────────────
+
+// State machine: DRAFT → SUBMITTED → EVALUATING → COMPLETED | FAILED
+enum AttemptStatus {
+  DRAFT
+  SUBMITTED
+  EVALUATING
+  COMPLETED
+  FAILED
+}
+
+enum Difficulty {
+  Beginner
+  Intermediate
+  Advanced
+}
+
+model Attempt {
+  id          String        @id @default(cuid())
+  problemId   String
+  sequence    Int           // 1-based attempt number per problem (per user in a real app)
+  status      AttemptStatus @default(DRAFT)
+  savedAt     DateTime      @default(now())
+  submittedAt DateTime?
+
+  problem     Problem       @relation(fields: [problemId], references: [id])
+  submission  Submission?
+  evaluation  Evaluation?
+}
+
+// ── Submission ────────────────────────────────────────────────────────────────
+// Stored separately so the attempt record is created immediately (status: DRAFT)
+// and submission content is associated when the learner fills the form.
+// Change Test A: a DiagramSubmission or CodeSubmission would be new models with
+// a shared discriminated type field — Attempt.submission becomes a polymorphic relation.
+
+model Submission {
+  id                String   @id @default(cuid())
+  attemptId         String   @unique
+  assumptions       String   @default("")
+  classes           String   @default("")
+  interfaces        String   @default("")
+  relationships     String   @default("")
+  designExplanation String   @default("")
+  edgeCases         String   @default("")
+  code              String   @default("")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  attempt           Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+}
+
+// ── Evaluation ────────────────────────────────────────────────────────────────
+
+model Evaluation {
+  id               String              @id @default(cuid())
+  attemptId        String              @unique
+  overallScore     Float               // 0–100
+  evaluatorKind    String              // "deterministic" | "ai"
+  strengths        String[]
+  improvements     String[]
+  nextAttemptFocus String[]
+  evaluatedAt      DateTime
+
+  attempt          Attempt             @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  criteria         EvaluationCriterion[]
+}
+
+model EvaluationCriterion {
+  id             String     @id @default(cuid())
+  evaluationId   String
+  name           String
+  score          Float      // actual score
+  maxScore       Float      // criterion weight
+  evaluatorKind  String     // "deterministic" | "ai"
+  evidence       String
+  concern        String
+  suggestion     String
+  confidence     Float      // 0–1
+
+  evaluation     Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+}
